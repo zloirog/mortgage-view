@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mortgage View</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+  <script src="vendor/chart.umd.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">🏠 Mortgage View</div>
+    <div class="top-controls">
+      <label class="inline"><span data-i18n="status"></span>
+        <select data-bind="status" data-rerender>
+          <option value="planning" data-i18n="planning"></option>
+          <option value="taken" data-i18n="taken"></option>
+        </select>
+      </label>
+      <label class="inline status-taken"><span data-i18n="since"></span> <input type="month" data-bind="takenOn"></label>
+      <label class="inline"><span data-i18n="currency"></span>
+        <select data-bind="currency" data-rerender>
+          <option>CZK</option><option>EUR</option><option>USD</option><option>GBP</option><option>CHF</option>
+          <option>PLN</option><option>HUF</option><option>SEK</option><option>NOK</option><option>DKK</option>
+        </select>
+      </label>
+      <label class="inline"><span data-i18n="language"></span>
+        <select data-bind="lang" data-rerender>
+          <option value="en">English</option>
+          <option value="ru">Русский</option>
+        </select>
+      </label>
+      <button class="ghost" data-action="export" data-i18n="export" data-i18n-title="exportTitle"></button>
+      <label class="ghost button" data-i18n-title="importTitle"><span data-i18n="import"></span><input type="file" accept="application/json" id="import" hidden></label>
+      <span id="save-status" class="save-status">…</span>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="mortgage" data-i18n="tabMortgage"></button>
+    <button role="tab" data-tab="scenarios" data-i18n="tabScenarios"></button>
+    <button role="tab" data-tab="calc" data-i18n="tabCalc"></button>
+  </nav>
+
+  <main>
+    <!-- ───────────── Mortgage ───────────── -->
+    <section id="tab-mortgage" class="tab">
+      <div class="grid-side">
+        <form class="card form" onsubmit="return false">
+          <h2 data-i18n="loan"></h2>
+          <label><span data-i18n="price"></span><input type="number" min="0" step="10000" data-bind="mortgage.price"></label>
+          <label><span data-i18n="downPayment"></span><input type="number" min="0" step="10000" data-bind="mortgage.downPayment"></label>
+          <label><span data-i18n="rate"></span><input type="number" min="0" step="0.01" data-bind="mortgage.rate"></label>
+          <label><span data-i18n="term"></span><input type="number" min="1" max="50" step="1" data-bind="mortgage.termYears"></label>
+          <label><span data-i18n="firstPayment"></span><input type="month" data-bind="mortgage.startDate" placeholder="YYYY-MM"></label>
+          <label><span data-i18n="repaymentType"></span>
+            <select data-bind="mortgage.type">
+              <option value="annuity" data-i18n="annuity"></option>
+              <option value="linear" data-i18n="linear"></option>
+            </select>
+          </label>
+          <label><span data-i18n="monthlyFees"></span><input type="number" min="0" step="1" data-bind="mortgage.monthlyFees"></label>
+          <label><span data-i18n="prepayFee"></span><input type="number" min="0" step="0.1" data-bind="mortgage.prepaymentFeePct"></label>
+          <h3><span data-i18n="rateChanges"></span> <span class="hint" data-i18n-title="rateChangesHint">ⓘ</span></h3>
+          <div id="rate-changes"></div>
+        </form>
+        <div class="stack">
+          <div id="mortgage-kpis" class="kpis"></div>
+          <div class="card"><h2 data-i18n="chBalance"></h2><div class="chart"><canvas id="ch-balance"></canvas></div></div>
+          <div class="card"><h2 data-i18n="chYearly"></h2><div class="chart"><canvas id="ch-yearly"></canvas></div></div>
+          <div class="card">
+            <div class="row-between"><h2 data-i18n="schedule"></h2>
+              <label class="inline"><input type="checkbox" id="monthly-toggle"> <span data-i18n="monthlyToggle"></span></label></div>
+            <div class="table-wrap"><table id="schedule"></table></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────── Scenarios ───────────── -->
+    <section id="tab-scenarios" class="tab">
+      <div class="grid-side">
+        <div class="card form">
+          <h2 data-i18n="scenarios"></h2>
+          <div id="scenario-list" class="scenario-list"></div>
+          <div id="scenario-editor"></div>
+        </div>
+        <div class="stack">
+          <div id="scenario-kpis" class="kpis"></div>
+          <div class="card"><h2 data-i18n="chScenarios"></h2><div class="chart"><canvas id="ch-scenarios"></canvas></div></div>
+          <div class="card"><h2 data-i18n="comparison"></h2><div class="table-wrap"><table id="scenario-table"></table></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────── Prepay vs Deposit ───────────── -->
+    <section id="tab-calc" class="tab">
+      <div class="grid-side">
+        <form class="card form" onsubmit="return false">
+          <h2 data-i18n="extraMoney"></h2>
+          <p class="muted small" data-i18n="extraMoneyHint"></p>
+          <div id="calc-extras"></div>
+          <label><span data-i18n="ifPrepaying"></span>
+            <select data-bind="calc.strategy">
+              <option value="term" data-i18n="stratTerm"></option>
+              <option value="payment" data-i18n="stratPayment"></option>
+            </select>
+          </label>
+          <h2 data-i18n="deposit"></h2>
+          <label><span data-i18n="depositRate"></span><input type="number" min="0" step="0.05" data-bind="calc.depositRate"></label>
+          <label><span data-i18n="tax"></span><input type="number" min="0" max="100" step="1" data-bind="calc.taxPct"></label>
+          <label><span data-i18n="horizon"></span><input type="number" min="1" max="50" step="1" data-bind="calc.horizonYears"></label>
+          <h2 data-i18n="saveCalc"></h2>
+          <div class="row"><input type="text" id="calc-name" data-i18n-ph="saveCalcPh"><button data-action="save-calc" data-i18n="save"></button></div>
+        </form>
+        <div class="stack">
+          <div id="calc-verdict" class="verdict"></div>
+          <div id="calc-kpis" class="kpis"></div>
+          <div class="card"><h2 data-i18n="chCalc"></h2><div class="chart"><canvas id="ch-calc"></canvas></div></div>
+          <div class="card">
+            <h2 data-i18n="myCalcs"></h2>
+            <div class="table-wrap"><table id="calc-table"></table></div>
+          </div>
+          <details class="card method">
+            <summary data-i18n="methodTitle"></summary>
+            <p data-i18n-html="method1"></p>
+            <ul>
+              <li data-i18n-html="method2"></li>
+              <li data-i18n-html="method3"></li>
+            </ul>
+            <p data-i18n="method4"></p>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

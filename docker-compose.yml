@@ -1,0 +1,14 @@
+services:
+  mortgage-view:
+    build: .
+    container_name: mortgage-view
+    restart: unless-stopped
+    ports:
+      - "9999:9999"
+    volumes:
+      - mortgage-data:/app/data
+    environment:
+      - LAN_ONLY=1   # reject requests from public IPs
+
+volumes:
+  mortgage-data:
