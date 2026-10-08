@@ -130,7 +130,7 @@ function chart(id, type, labels, datasets, extra = {}) {
       elements: { point: { radius: 0, hoverRadius: 4 }, line: { borderWidth: 2, tension: 0 } },
       plugins: {
         legend: { labels: { boxWidth: 12, boxHeight: 12 } },
-        tooltip: { callbacks: { title: (it) => (extra.monthly ? ymText(it[0].label) : it[0].label), label: (c) => `${c.dataset.label}: ${money(c.parsed.y)}` } },
+        tooltip: { callbacks: { title: (it) => (extra.monthly ? ymText(it[0].label) : it[0].label), label: (c) => `${c.dataset.label}: ${money(c.parsed.y)}`, footer: (it) => (extra.stacked && it.length > 1 ? `${t('total')}: ${money(it.reduce((s, x) => s + x.parsed.y, 0))}` : '') } },
       },
       scales: {
         x: { stacked: !!extra.stacked, grid: { display: false }, ticks: { maxTicksLimit: 12, autoSkip: true, maxRotation: 0, callback(v) { const l = this.getLabelForValue(v); return extra.monthly ? l.slice(0, 4) : l; } } },
@@ -253,6 +253,12 @@ function renderMortgage() {
     list.map((r) => `<tr class="${r.now ? 'now' : ''}"><td>${r.label}</td>${monthly ? `<td>${pct(r.rate)}</td>` : ''}<td>${money(r.payment)}</td><td>${money(r.principal)}</td><td>${money(r.interest)}</td>${s.totalFees ? `<td>${money(r.fee)}</td>` : ''}<td>${money(r.balance)}</td></tr>`).join('') + '</tbody>';
 }
 
+// Regular monthly payment incl. fees. The very last month is only a top-up of the remainder,
+// so "end" uses the month before it.
+const fees = () => +state.mortgage.monthlyFees || 0;
+const endIdx = (res) => Math.max(0, res.rows.length - 2);
+const payAt = (res, i) => (res.rows[i] ? res.rows[i].payment + fees() : null);
+
 function renderScenarios() {
   const m = state.mortgage;
   const pal = palette();
@@ -265,7 +271,7 @@ function renderScenarios() {
     kpi(t('kPaidOff'), ymText(active.res.endDate), active.monthsSaved > 0 ? t('kEarlier', { d: duration(active.monthsSaved) }) : t('kSameDate')),
     kpi(t('kExtraIn'), money(active.res.totalExtra), active.res.totalFees - base.totalFees > 0.5 ? t('kFeesX', { x: money(active.res.totalFees - base.totalFees) }) : ''),
     kpi(t('kPerExtra'), active.res.totalExtra ? num(active.netSaved / active.res.totalExtra) : '—', t('kPerExtraSub')),
-    kpi(t('kLastPay'), money(active.res.lastPayment), t('kPlanX', { x: money(base.lastPayment) })),
+    kpi(t('kPayEnd'), money(payAt(active.res, endIdx(active.res))), t('kVsPlan', { x: signed(payAt(active.res, endIdx(active.res)) - payAt(base, endIdx(active.res))) })),
   ].join('') : '';
 
   const labels = base.rows.map((r) => r.date);
@@ -279,12 +285,37 @@ function renderScenarios() {
     })),
   ], { monthly: true });
 
-  $('#scenario-table').innerHTML = `<thead><tr><th>${t('thScenario')}</th><th>${t('thExtra')}</th><th>${t('thInterest')}</th><th>${t('thSaved')}</th><th>${t('thPaidOff')}</th><th>${t('thEarlier')}</th><th>${t('thPerExtra')}</th></tr></thead><tbody>
-    <tr><td>${t('plan')}</td><td>—</td><td>${money(base.totalInterest)}</td><td>—</td><td>${ymText(base.endDate)}</td><td>—</td><td>—</td></tr>` +
+  chart('ch-scen-payment', 'line', labels, [
+    { label: t('plan'), data: labels.map((_, k) => payAt(base, k)), borderColor: css('--c-base'), borderDash: [6, 4] },
+    ...results.map((r, i) => ({ label: r.sc.name || t('unnamed'), data: labels.map((_, k) => payAt(r.res, k)), borderColor: pal[i % pal.length], borderWidth: r.sc.id === state.activeScenario ? 3 : 1.5, stepped: true })),
+  ], { monthly: true });
+
+  // full amount paid: principal + interest (+ fees), per scenario
+  const all = [{ name: t('plan'), res: base }, ...results.map((r) => ({ name: r.sc.name || t('unnamed'), res: r.res }))];
+  const totals = [
+    { label: t('principal'), data: all.map((x) => x.res.principal), backgroundColor: pal[2] },
+    { label: t('interest'), data: all.map((x) => x.res.totalInterest), backgroundColor: pal[1] },
+  ];
+  if (all.some((x) => x.res.totalFees > 0)) totals.push({ label: t('fees'), data: all.map((x) => x.res.totalFees), backgroundColor: css('--c-base') });
+  chart('ch-scen-total', 'bar', all.map((x) => x.name), totals, { stacked: true });
+
+  const cum = (res) => { let s = 0; const byI = res.rows.map((r) => (s += r.payment + r.extra + r.fee)); return labels.map((_, k) => byI[Math.min(k, byI.length - 1)]); };
+  chart('ch-scen-cum', 'line', labels, [
+    { label: t('plan'), data: cum(base), borderColor: css('--c-base'), borderDash: [6, 4] },
+    ...results.map((r, i) => ({ label: r.sc.name || t('unnamed'), data: cum(r.res), borderColor: pal[i % pal.length], borderWidth: r.sc.id === state.activeScenario ? 3 : 1.5 })),
+  ], { monthly: true });
+
+  $('#scenario-table').innerHTML = `<thead><tr><th>${t('thScenario')}</th><th>${t('thMonthly')}</th><th>${t('thTotalPaid')}</th><th>${t('thExtra')}</th><th>${t('thInterest')}</th><th>${t('thSaved')}</th><th>${t('thPaidOff')}</th><th>${t('thEarlier')}</th><th>${t('thPerExtra')}</th></tr></thead><tbody>
+    <tr><td>${t('plan')}</td><td>${payRange(base)}</td><td>${money(base.totalPaid)}</td><td>—</td><td>${money(base.totalInterest)}</td><td>—</td><td>${ymText(base.endDate)}</td><td>—</td><td>—</td></tr>` +
     results.map((r, i) => `<tr><td><span class="swatch" style="display:inline-block;background:${pal[i % pal.length]}"></span> ${esc(r.sc.name)}</td>
-      <td>${money(r.res.totalExtra)}</td><td>${money(r.res.totalInterest)}</td><td class="good">${money(r.interestSaved)}</td>
+      <td>${payRange(r.res)}</td><td>${money(r.res.totalPaid)}</td><td>${money(r.res.totalExtra)}</td><td>${money(r.res.totalInterest)}</td><td class="good">${money(r.interestSaved)}</td>
       <td>${ymText(r.res.endDate)}</td><td>${r.monthsSaved > 0 ? duration(r.monthsSaved) : '—'}</td>
       <td>${r.res.totalExtra ? num(r.netSaved / r.res.totalExtra) : '—'}</td></tr>`).join('') + '</tbody>';
+}
+
+function payRange(res) {
+  const a = payAt(res, 0), b = payAt(res, endIdx(res));
+  return Math.abs(a - b) < 1 ? money(a) : `${money(a)} → ${money(b)}`;
 }
 
 function calcSummary(c) {
