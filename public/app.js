@@ -20,8 +20,8 @@ function defaults() {
     tab: 'mortgage',
     mortgage: { price: 6000000, downPayment: 1200000, rate: 4.9, termYears: 30, startDate: start, type: 'annuity', monthlyFees: 0, prepaymentFeePct: 0, rateChanges: [] },
     scenarios: [
-      { id: uid(), name: t('defScenario1'), strategy: 'term', extras: [{ type: 'monthly', from: start, to: '', amount: 3000 }] },
-      { id: uid(), name: t('defScenario2'), strategy: 'term', extras: [{ type: 'yearly', from: E.addMonths(start, 11), to: '', amount: 100000 }] },
+      { id: uid(), name: t('defScenario1'), extras: [{ type: 'monthly', from: start, to: '', amount: 3000, strategy: 'term' }] },
+      { id: uid(), name: t('defScenario2'), extras: [{ type: 'yearly', from: E.addMonths(start, 11), to: '', amount: 100000, strategy: 'term' }] },
     ],
     activeScenario: null,
     calc: { extras: [{ type: 'once', date: E.addMonths(start, 12), from: '', to: '', amount: 200000 }], strategy: 'term', depositRate: 3.5, taxPct: 15, horizonYears: 30 },
@@ -78,6 +78,15 @@ async function load() {
   } catch {
     state = defaults();
     saveEl().textContent = t('offline');
+  }
+  normalize();
+}
+
+// Older data kept the strategy on the scenario; move it onto each payment.
+function normalize() {
+  for (const sc of state.scenarios) {
+    for (const e of sc.extras) e.strategy ||= sc.strategy || 'term';
+    delete sc.strategy;
   }
   if (!state.scenarios.find((s) => s.id === state.activeScenario)) state.activeScenario = state.scenarios[0]?.id ?? null;
 }
@@ -141,7 +150,8 @@ function chart(id, type, labels, datasets, extra = {}) {
 }
 
 // ───────────────────────── structure (dynamic lists) ─────────────────────────
-function extrasEditor(path) {
+// withStrategy: each payment chooses shorten-term / lower-payment (scenarios only)
+function extrasEditor(path, withStrategy = false) {
   const list = getPath(path);
   const rows = list.map((e, i) => {
     const p = `${path}.${i}`;
@@ -155,6 +165,8 @@ function extrasEditor(path) {
       <button class="icon" data-action="remove" data-path="${path}" data-idx="${i}" title="${t('remove')}">✕</button>
       ${dates}
       <label ${e.type === 'once' ? '' : 'style="grid-column:1/-1"'}>${t('amount')}<input type="number" min="0" step="1000" data-bind="${p}.amount"></label>
+      ${withStrategy ? `<label style="grid-column:1/-1">${t('useFor')}<select data-bind="${p}.strategy">
+        <option value="term">${t('stratTerm')}</option><option value="payment">${t('stratPayment')}</option></select></label>` : ''}
     </div>`;
   });
   return rows.join('') + `<button class="ghost" data-action="add-extra" data-path="${path}">${t('addPayment')}</button>`;
@@ -187,14 +199,8 @@ function renderStructure() {
   const idx = state.scenarios.findIndex((s) => s.id === state.activeScenario);
   $('#scenario-editor').innerHTML = idx < 0 ? `<p class="muted">${t('noScenarios')}</p>` : `
     <label>${t('name')}<input type="text" data-bind="scenarios.${idx}.name" data-rerender></label>
-    <label>${t('afterExtra')}
-      <select data-bind="scenarios.${idx}.strategy">
-        <option value="term">${t('stratTerm')}</option>
-        <option value="payment">${t('stratPayment')}</option>
-      </select>
-    </label>
     <h3>${t('extraPayments')}</h3>
-    ${extrasEditor(`scenarios.${idx}.extras`)}
+    ${extrasEditor(`scenarios.${idx}.extras`, true)}
     <div class="row" style="margin-top:14px">
       <button class="ghost" data-action="dup-scenario">${t('duplicate')}</button>
       <button class="danger" data-action="del-scenario">${t('delete')}</button>
@@ -412,7 +418,9 @@ const actions = {
     state.mortgage.rateChanges.push({ date: last ? E.addMonths(last.date, 60) : E.addMonths(state.mortgage.startDate, 60), rate: state.mortgage.rate });
   },
   'add-extra'(b) {
-    getPath(b.dataset.path).push({ type: 'once', date: state.mortgage.startDate, from: '', to: '', amount: 50000 });
+    const x = { type: 'once', date: state.mortgage.startDate, from: '', to: '', amount: 50000 };
+    if (b.dataset.path.startsWith('scenarios.')) x.strategy = 'term';
+    getPath(b.dataset.path).push(x);
   },
   remove(b) {
     getPath(b.dataset.path).splice(+b.dataset.idx, 1);
@@ -421,7 +429,7 @@ const actions = {
     state.activeScenario = b.dataset.id;
   },
   'add-scenario'() {
-    const sc = { id: uid(), name: t('scenarioN', { n: state.scenarios.length + 1 }), strategy: 'term', extras: [{ type: 'once', date: E.addMonths(state.mortgage.startDate, 12), from: '', to: '', amount: 200000 }] };
+    const sc = { id: uid(), name: t('scenarioN', { n: state.scenarios.length + 1 }), extras: [{ type: 'once', date: E.addMonths(state.mortgage.startDate, 12), from: '', to: '', amount: 200000, strategy: 'term' }] };
     state.scenarios.push(sc);
     state.activeScenario = sc.id;
   },
@@ -488,6 +496,7 @@ $('#import').addEventListener('change', async (e) => {
     const data = JSON.parse(await f.text());
     if (!confirm(t('confirmImport'))) return;
     state = merge(defaults(), data);
+    normalize();
     changed(true);
   } catch {
     alert(t('badFile'));

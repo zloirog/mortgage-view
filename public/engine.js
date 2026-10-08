@@ -61,6 +61,9 @@ export function expandExtras(extras = [], startYM, horizon) {
  * sc: {strategy:'term'|'payment', extras:[...]}
  *   strategy 'term'    – extra payments keep the monthly payment, loan ends earlier
  *   strategy 'payment' – extra payments keep the end date, monthly payment drops
+ *   Each extra may set its own `strategy`; sc.strategy is the default. When both kinds
+ *   fall in the same month, the 'payment' part is applied first (payment recalculated
+ *   over the current remaining term), then the 'term' part (payment kept, end moves in).
  */
 export function simulate(m, sc = {}) {
   const principal0 = loanAmount(m);
@@ -70,7 +73,9 @@ export function simulate(m, sc = {}) {
   const linear = m.type === 'linear';
   const monthlyFees = +m.monthlyFees || 0;
   const feePct = (+m.prepaymentFeePct || 0) / 100;
-  const extras = expandExtras(sc.extras, start, n0);
+  const byStrategy = (s) => expandExtras((sc.extras || []).filter((e) => (e.strategy || strategy) === s), start, n0);
+  const extrasTerm = byStrategy('term');
+  const extrasPayment = byStrategy('payment');
 
   let annualRate = +m.rate || 0;
   const changes = new Map();
@@ -106,19 +111,22 @@ export function simulate(m, sc = {}) {
     }
     balance -= principal;
 
-    const extra = Math.min(extras.get(i) || 0, Math.max(0, balance));
-    balance -= extra;
-    if (balance < 0.005) balance = 0;
-    const fee = monthlyFees + extra * feePct;
-
-    if (extra > 0 && balance > 0) {
-      const remaining = targetEnd - (i + 1);
-      if (strategy === 'payment') {
-        payment = linear ? balance / remaining : annuityPayment(balance, r, remaining);
-      } else if (!linear) {
-        targetEnd = i + 1 + nper(balance, r, payment);
-      }
+    // lower-the-payment part: keep the current end date, recalculate the payment
+    const xPay = Math.min(extrasPayment.get(i) || 0, Math.max(0, balance));
+    balance -= xPay;
+    if (xPay > 0 && balance > 0.005) {
+      const remaining = Math.max(1, targetEnd - (i + 1));
+      payment = linear ? balance / remaining : annuityPayment(balance, r, remaining);
     }
+    // shorten-the-term part: keep the payment, move the end date in
+    const xTerm = Math.min(extrasTerm.get(i) || 0, Math.max(0, balance));
+    balance -= xTerm;
+    if (xTerm > 0 && balance > 0.005) {
+      targetEnd = i + 1 + (linear ? Math.ceil(balance / payment - 1e-9) : nper(balance, r, payment));
+    }
+    if (balance < 0.005) balance = 0;
+    const extra = xPay + xTerm;
+    const fee = monthlyFees + extra * feePct;
 
     rows.push({ i, date: addMonths(start, i), rate: annualRate, payment: pay, interest, principal, extra, fee, balance });
   }

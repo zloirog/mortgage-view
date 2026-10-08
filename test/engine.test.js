@@ -58,3 +58,37 @@ test('prepay vs deposit: with zero deposit rate prepaying wins; at huge rate dep
   const beTaxed = breakEvenDepositRate(m, { ...c, taxPct: 20 });
   assert.ok(beTaxed > be, 'tax raises the needed gross rate');
 });
+
+test('per-payment strategy: 1M lower payment + 1M shorten term in one scenario', () => {
+  const big = { ...m, price: 10500000, downPayment: 0, rate: 5.34 };
+  const base = simulate(big);
+  const payOnly = simulate(big, { extras: [{ type: 'once', date: '2028-01', amount: 1e6, strategy: 'payment' }] });
+  const mixed = simulate(big, { extras: [
+    { type: 'once', date: '2028-01', amount: 1e6, strategy: 'payment' },
+    { type: 'once', date: '2028-01', amount: 1e6, strategy: 'term' },
+  ] });
+  // payment drops exactly as with the 1M "lower payment" alone…
+  close(mixed.rows[20].payment, payOnly.rows[20].payment);
+  assert.ok(mixed.rows[20].payment < base.rows[20].payment - 1000);
+  // …and the extra 1M shortens the loan
+  assert.equal(payOnly.months, 360);
+  assert.ok(mixed.months < 360);
+  assert.equal(mixed.rows.at(-1).balance, 0);
+  close(mixed.totalExtra, 2e6);
+});
+
+test('scenario-level strategy still works as default', () => {
+  const a = simulate(m, { strategy: 'payment', extras: [{ type: 'once', date: '2028-01', amount: 30000 }] });
+  const b = simulate(m, { extras: [{ type: 'once', date: '2028-01', amount: 30000, strategy: 'payment' }] });
+  close(a.totalInterest, b.totalInterest);
+});
+
+test('linear + shorten term then lower payment keeps the shortened end', () => {
+  const lin = { ...m, type: 'linear' };
+  const s = simulate(lin, { extras: [
+    { type: 'once', date: '2028-01', amount: 50000, strategy: 'term' },
+    { type: 'once', date: '2030-01', amount: 20000, strategy: 'payment' },
+  ] });
+  const t = simulate(lin, { extras: [{ type: 'once', date: '2028-01', amount: 50000, strategy: 'term' }] });
+  assert.equal(s.months, t.months);
+});
